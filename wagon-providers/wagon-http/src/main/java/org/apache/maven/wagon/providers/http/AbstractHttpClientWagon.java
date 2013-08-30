@@ -270,7 +270,7 @@ public abstract class AbstractHttpClientWagon
      * <b>disabled by default</b>
      *
      * @since 2.0
-     * @see BrowserCompatHostnameVerifier
+     * @see org.apache.http.conn.ssl.BrowserCompatHostnameVerifier
      */
     protected static boolean sslAllowAll =
         Boolean.valueOf( System.getProperty( "maven.wagon.http.ssl.allowall", "false" ) );
@@ -549,14 +549,7 @@ public abstract class AbstractHttpClientWagon
             // preemptive for put
             if ( StringUtils.isNotEmpty( username ) && StringUtils.isNotEmpty( password ) )
             {
-                AuthCache authCache = new BasicAuthCache();
-                BasicScheme basicAuth = new BasicScheme();
-                HttpHost targetHost =
-                    new HttpHost( repository.getHost(), repository.getPort(), repository.getProtocol() );
-                authCache.put( targetHost, basicAuth );
-
-                localContext = new BasicHttpContext();
-                localContext.setAttribute( ClientContext.AUTH_CACHE, authCache );
+                localContext = createBasicHttpContext();
             }
         }
 
@@ -658,7 +651,7 @@ public abstract class AbstractHttpClientWagon
         String repositoryUrl = getRepository().getUrl();
         String url = repositoryUrl + ( repositoryUrl.endsWith( "/" ) ? "" : "/" ) + resourceName;
         HttpHead headMethod = new HttpHead( url );
-        HttpResponse response = null;
+        HttpResponse response;
         int statusCode;
         try
         {
@@ -737,7 +730,7 @@ public abstract class AbstractHttpClientWagon
                     creds = new UsernamePasswordCredentials( proxyInfo.getUserName(), proxyInfo.getPassword() );
                 }
 
-                Header bs = new BasicScheme().authenticate( creds, httpMethod );
+                Header bs = new BasicScheme().authenticate( creds, httpMethod, localContext );
                 httpMethod.addHeader( "Proxy-Authorization", bs.getValue() );
             }
 
@@ -762,14 +755,7 @@ public abstract class AbstractHttpClientWagon
                 if ( StringUtils.isNotEmpty( username ) && StringUtils.isNotEmpty( password ) )
                 {
 
-                    AuthCache authCache = new BasicAuthCache();
-                    BasicScheme basicAuth = new BasicScheme();
-                    HttpHost targetHost =
-                        new HttpHost( repository.getHost(), repository.getPort(), repository.getProtocol() );
-                    authCache.put( targetHost, basicAuth );
-
-                    localContext = new BasicHttpContext();
-                    localContext.setAttribute( ClientContext.AUTH_CACHE, authCache );
+                    localContext = createBasicHttpContext();
                 }
 
             }
@@ -785,6 +771,18 @@ public abstract class AbstractHttpClientWagon
             int readTimeout = getReadTimeout();
             method.getParams().setParameter( CoreConnectionPNames.SO_TIMEOUT, readTimeout );
         }
+    }
+
+    private BasicHttpContext createBasicHttpContext()
+    {
+        AuthCache authCache = new BasicAuthCache();
+        BasicScheme basicAuth = new BasicScheme();
+        HttpHost targetHost = new HttpHost( repository.getHost(), repository.getPort(), repository.getProtocol() );
+        authCache.put( targetHost, basicAuth );
+
+        BasicHttpContext ctx = new BasicHttpContext();
+        ctx.setAttribute( ClientContext.AUTH_CACHE, authCache );
+        return ctx;
     }
 
     protected void setHeaders( HttpUriRequest method )
@@ -812,9 +810,9 @@ public abstract class AbstractHttpClientWagon
         Header[] headers = config == null ? null : config.asRequestHeaders();
         if ( headers != null )
         {
-            for ( int i = 0; i < headers.length; i++ )
+            for ( Header header : headers )
             {
-                method.addHeader( headers[i] );
+                method.addHeader( header );
             }
         }
     }
@@ -844,7 +842,7 @@ public abstract class AbstractHttpClientWagon
      * Implementors can override this to remove unwanted parts of the url such as role-hints
      *
      * @param repository
-     * @return
+     * @return The url
      */
     protected String getURL( Repository repository )
     {
@@ -989,7 +987,7 @@ public abstract class AbstractHttpClientWagon
         }
 
         Header contentEncoding = response.getFirstHeader( "Content-Encoding" );
-        boolean isGZipped = contentEncoding == null ? false : "gzip".equalsIgnoreCase( contentEncoding.getValue() );
+        boolean isGZipped = contentEncoding != null && "gzip".equalsIgnoreCase( contentEncoding.getValue() );
 
         try
         {
